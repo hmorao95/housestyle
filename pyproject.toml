@@ -1,0 +1,25 @@
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "housestyle"
+version = "1.0.0"
+description = "Paper figures in the mshipping MATLAB house style, drawn with matplotlib."
+readme = "README.md"
+requires-python = ">=3.10"
+authors = [{ name = "Hugo Morão" }]
+dependencies = ["matplotlib>=3.8", "numpy>=1.24"]
+
+[project.optional-dependencies]
+test = ["pytest>=7", "pandas>=2", "pillow>=9"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+housestyle = ["py.typed"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
