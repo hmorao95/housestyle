@@ -1,7 +1,7 @@
 """Colors, sizes and matplotlib settings that reproduce the MATLAB house style.
 
 Font sizes are calibrated against MATLAB R2026a export_fig output of the same figures
-(matlab/images): with tick labels at 10 pt the two match to the pixel, titles measure
+(images/matlab_reference): with tick labels at 10 pt the two match to the pixel, titles measure
 13.2 pt, and LaTeX labels and legends measure 10.25 and 10 pt in matplotlib's
 Computer Modern. Line widths are in points in both. Dash patterns scale with line
 width, as measured: dashes 4 widths on and 4 off, dash-dot 4-1-2-1.

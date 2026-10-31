@@ -86,7 +86,8 @@ Labels written for MATLAB's LaTeX interpreter port unchanged: `'\%'`, `'2016 \$'
 
 ![MATLAB and Python output of the same figure](images/matlab_vs_python.png)
 
-Matched by measurement against `matlab/images`:
+Matched by measurement against `images/matlab_reference`, MATLAB R2026a `export_fig`
+output of the same example figures:
 
 - Panel positions follow MATLAB's `subplot.m` geometry, including the shrink when
   labels overflow a cell and the room reserved for a legend below the axes. Image
@@ -129,8 +130,7 @@ src/housestyle/     the package
 examples/           example figures and run_examples.py
 tests/              pytest suite
 images/             gallery and the MATLAB comparison
-matlab/             the same helpers for MATLAB (hs_figure, hs_irf, ...) and the
-                    reference images the Python output is calibrated against
+images/matlab_reference/   MATLAB output the package is calibrated against
 STYLE.md            the rules
 ```
 
