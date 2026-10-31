@@ -295,3 +295,107 @@ def test_export_respects_folder_and_suffix(tmp_path):
     out = hs.export(fig, tmp_path / "figs" / "f.pdf", close=True)
     assert out.suffix == ".pdf" and out.is_file()
     assert not plt.fignum_exists(fig.number)
+
+
+# ---- 1.1: MATLAB behaviours the paper figures needed ----------------------------
+
+def test_tickaligned_stops_at_data_when_padding_is_large():
+    # data -0.003 .. 0.104, MATLAB step 0.05: -0.05 would pad 44 percent of the range,
+    # 0.15 would pad 43 percent, so both limits stop at the data
+    _, ax = hs.figure(1, 1)
+    ax.plot([0, 1], [-0.003, 0.104])
+    hs.tickaligned(ax, 0.05)
+    assert ax.get_ylim() == pytest.approx((-0.003, 0.104))
+    assert list(ax.get_yticks()) == pytest.approx([0, 0.05, 0.1])
+
+
+def test_tickaligned_rounds_out_when_padding_is_small():
+    _, ax = hs.figure(1, 1)
+    ax.plot([0, 1], [-0.48, 1.04])
+    hs.tickaligned(ax, 0.5)
+    assert ax.get_ylim() == pytest.approx((-0.5, 1.04))     # 0.02 kept, 0.46 too much
+    hs.finish(ax, zero=False)                                # finish keeps the limits
+    assert ax.get_ylim() == pytest.approx((-0.5, 1.04))
+
+
+def test_tickaligned_default_step_is_current_spacing():
+    _, ax = hs.figure(1, 1)
+    ax.plot([0, 1], [0.0, 1.0])
+    ax.set_yticks([0, 0.25, 0.5, 0.75, 1.0])
+    hs.tickaligned(ax)
+    assert list(ax.get_yticks()) == pytest.approx([0, 0.25, 0.5, 0.75, 1.0])
+
+
+def test_hline_vline_match_matlab_constant_lines():
+    _, ax = hs.figure(1, 1)
+    hs.line(ax, [0, 1], [0, 1], 1)
+    top = hs.hline(ax, 0.5)
+    under = hs.vline(ax, 0.5, color="k", linestyle="--", layer="bottom")
+    assert top.get_alpha() == pytest.approx(0.7) and top.get_linewidth() == 0.5
+    assert top.zorder > 2 > under.zorder
+    assert under.get_linestyle() == "--"
+    assert top.get_label() == "_nolegend_"
+
+
+def test_note_is_latex_at_matlab_size():
+    _, ax = hs.figure(1, 1)
+    t = hs.note(ax, 0.5, 0.5, r"Disposal floor $-\phi$", ha="right")
+    assert t.get_fontsize() == pytest.approx(8 * hs.LATEX_SCALE)
+    assert t.get_text() == r"$\text{Disposal floor }-\phi$"
+    two = hs.note(ax, 0.5, 0.5, ["a", "b"], size=10, ha="left")
+    assert two.get_text().count("\n") == 1 and two.get_fontsize() == pytest.approx(10 * hs.LATEX_SCALE)
+    ax.figure.canvas.draw()
+
+
+def test_tex_dashes():
+    assert hs.tex("2020--2026") == r"$\text{2020" + "–" + "2026}$"
+    assert hs.tex("a---b") == r"$\text{a" + "—" + "b}$"
+    assert hs.tex("$x--y$") == "$x--y$"                  # math untouched
+
+
+def test_legend_size_keeps_30pt_sample():
+    _, ax = hs.figure(1, 1)
+    a = hs.line(ax, [0, 1], [0, 1], 1)
+    leg = hs.legend(ax, [a], ["x"], size=10)
+    fs = leg.get_texts()[0].get_fontsize()
+    assert fs == pytest.approx(10 * hs.LATEX_SCALE)
+    assert leg.handlelength * fs == pytest.approx(30)
+
+
+def test_legend_marker_only_short_sample():
+    _, ax = hs.figure(1, 1)
+    (p,) = ax.plot([0, 1], [0, 1], linestyle="none", marker="o")
+    leg = hs.legend(ax, [p], ["points"])
+    assert leg.handlelength * leg.get_texts()[0].get_fontsize() == pytest.approx(10)
+
+
+def test_colorbar_geometry_and_style():
+    fig, ax = hs.figure(1, 1, 600, 860)
+    z = np.add.outer(np.arange(5.0), np.arange(5.0))
+    cf = ax.contourf(z, levels=np.arange(0, 9))
+    cb = hs.colorbar(ax, cf, label=r"Price $p_R$", ticks=[0, 4, 8])
+    x, y, w, h = ax.get_position().bounds
+    assert (x, y, w, h) == pytest.approx((0.13, 0.11, 0.7223, 0.815), abs=2e-4)   # MATLAB
+    cx, cy, cw, ch = cb.ax.get_position().bounds
+    assert cx == pytest.approx(x + w + 10.2 / 860, abs=1e-4) and cw == pytest.approx(21.4 / 860)
+    assert not cb.ax.yaxis._major_tick_kw.get("gridOn", False)
+    assert len(cb.ax.get_yticks(minor=True)) == 0
+    hs.fit(fig)                                     # the bar follows the panel
+    p = ax.get_position()
+    assert cb.ax.get_position().x0 == pytest.approx(p.x1 + 10.2 / 860, abs=1e-6)
+    assert cb.ax.get_position().height == pytest.approx(p.height)
+
+
+def test_yyaxis_colors_and_fit_counts_twin():
+    fig, ax = hs.figure(1, 1, 460)
+    hs.line(ax, [0, 1], [0, 1], "data")
+    ax2 = hs.yyaxis(ax)
+    hs.line(ax2, [0, 1], [1, 0], 2)
+    hs.finish(ax, None, "Left", zero=False)
+    hs.finish(ax2, None, "A long right-hand label, units", zero=False)
+    assert ax.yaxis.label.get_color() == hs.DATA and ax2.yaxis.label.get_color() == hs.SECOND
+    assert ax2.spines["right"].get_edgecolor()[:3] == pytest.approx(hs.SECOND)
+    assert not ax.spines["right"].get_visible()
+    hs.fit(fig)
+    r = fig.canvas.get_renderer()
+    assert ax2.get_tightbbox(r).transformed(fig.transFigure.inverted()).x1 <= 1 + 1e-3

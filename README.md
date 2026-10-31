@@ -71,14 +71,20 @@ Labels written for MATLAB's LaTeX interpreter port unchanged: `'\%'`, `'2016 \$'
 | `shade(ax, x0, x1, label)` | Grey shaded episode over the full height, behind the data |
 | `event(ax, x, y, label)` | Black dot with an 8 pt label |
 | `bars(ax, x, Y)` | Stacked bars for decompositions, touching, no edges |
+| `note(ax, x, y, s, size)` | LaTeX text at MATLAB's point size, as `text(..., 'Interpreter', 'latex')`; a list gives several lines |
+| `hline(ax, y)`, `vline(ax, x)` | Reference lines as MATLAB `yline`/`xline` draw them: alpha 0.7, on top of the data unless `layer="bottom"` |
 | `finish(ax, title, ylabel, xlabel)` | Bold title, LaTeX labels, MATLAB tick numbers, year ticks on dates, thins crowded y ticks keeping 0, zero line |
-| `legend(ax, handles, labels, outside)` | LaTeX legend in a square box; `outside="south"` puts it below in one row |
+| `legend(ax, handles, labels, outside, size)` | LaTeX legend in a square box; `outside="south"` puts it below in one row; `size` is MATLAB's legend FontSize, with the 30 pt line sample kept; marker-only entries get MATLAB's short sample |
+| `tickaligned(ax, step)` | MATLAB's tickaligned y-limits: round out to the next tick unless that pads more than 24% of the data range |
+| `yyaxis(ax, left, right)` | Right-hand y axis as MATLAB `yyaxis` draws it, each axis in its series color; returns the right axes |
+| `colorbar(ax, mappable, label)` | Colorbar placed as MATLAB's `eastoutside`: the panel gives up room, the bar follows it in `fit` |
 | `years(ax, base)` | Year ticks on a date axis |
-| `fit(fig)` | Shrink panels whose labels overflow their cell, as MATLAB does; `export` calls it |
+| `fit(fig)` | Shrink panels whose labels overflow their cell, as MATLAB does, counting a twin's labels; `export` calls it |
 | `outdir(path)` | Get or set the export folder |
 | `export(fig, name)` | 300 dpi PNG (or PDF by suffix) on white, cropped to the content |
-| `tex(label)` | The LaTeX conversion `finish` and `legend` apply |
+| `tex(label)` | The LaTeX conversion `finish`, `legend` and `note` apply; `--` is an en dash |
 | `MAIN BAND DATA SECOND THIRD FOURTH GREY STACK INK` | The palette |
+| `LATEX_SCALE` | MATLAB LaTeX point size to matplotlib size, 0.93 |
 
 `help(hs.finish)` and friends give the details. The rules are in [STYLE.md](STYLE.md).
 
@@ -100,9 +106,14 @@ output of the same example figures:
 - Tick labels as MATLAB writes them (`0`, `0.5`, `-0.4`), inward ticks on all four
   sides with MATLAB's length, y limits rounded to ticks.
 
-Differences that remain: matplotlib picks its own tick steps, which now and then
-differ from MATLAB's; and Computer Modern comes from matplotlib's mathtext rather
-than a TeX engine.
+Differences that remain:
+
+- matplotlib picks its own tick steps, which now and then differ from MATLAB's.
+  `tickaligned(ax, step)` reproduces MATLAB's limits when you pass MATLAB's step.
+- `legend(loc="best")` can choose a different spot from MATLAB's `'best'`. Pin a
+  legend with `loc` and `bbox_to_anchor` when the position matters.
+- mathtext has no `\underline`; `\underset{\overline{\ \ }}{a}` draws the same mark.
+- Computer Modern comes from matplotlib's mathtext rather than a TeX engine.
 
 ## Gallery
 
@@ -121,7 +132,7 @@ than a TeX engine.
 py -m pytest
 ```
 
-33 tests cover the geometry, labels, ticks, marks, legend layout and export.
+43 tests cover the geometry, labels, ticks, marks, legends, colorbars, twin axes and export.
 
 ## Layout
 
@@ -134,4 +145,4 @@ images/matlab_reference/   MATLAB output the package is calibrated against
 STYLE.md            the rules
 ```
 
-Version 1.0.0, 31 October 2026. Hugo Morão.
+Version 1.1.0, 31 October 2026. Hugo Morão.

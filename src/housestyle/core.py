@@ -10,14 +10,16 @@ import matplotlib.dates as mdates
 import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.axes import Axes
-from matplotlib.collections import PolyCollection
+from matplotlib.collections import PathCollection, PolyCollection
+from matplotlib.colorbar import Colorbar
 from matplotlib.container import BarContainer
 from matplotlib.figure import Figure
 from matplotlib.legend import Legend
 from matplotlib.lines import Line2D
 from matplotlib.patches import Polygon
-from matplotlib.text import Annotation
+from matplotlib.text import Annotation, Text
 from matplotlib.ticker import FixedFormatter, FixedLocator, FuncFormatter, ScalarFormatter
+from matplotlib.transforms import Bbox
 
 from . import _style as S
 from ._style import use
@@ -35,6 +37,11 @@ _SERIES: dict[Any, dict[str, Any]] = {
     "data": dict(color=S.DATA, linewidth=1.5, linestyle="-"),
 }
 _SERIES_NAMES = {"main": 1, "second": 2, "third": 3, "fourth": 4, "data": "data"}
+
+# MATLAB colorbar('eastoutside'), MATLAB pixels, measured on an 860 px wide figure: the plot
+# box gives up CARVE, the bar sits GAP to its right and is WIDTH wide
+_CBAR_CARVE_PX, _CBAR_GAP_PX, _CBAR_WIDTH_PX = 45.3, 10.2, 21.4
+_LAYER = {"top": 3.0, "bottom": 1.5}      # MATLAB xline/yline Layer property
 
 _outdir: Path | None = None
 
@@ -95,7 +102,8 @@ def fit(fig: Figure) -> None:
     """Shrink panels whose labels, title or legend overflow their subplot cell.
 
     MATLAB keeps each panel's decorations inside its cell and shrinks the plot box when
-    they do not fit. export() calls this; call it yourself before plt.show() or a
+    they do not fit. A right-hand twin's labels count with its panel's, and a colorbar
+    follows its panel. export() calls this; call it yourself before plt.show() or a
     direct savefig.
     """
     axs = [ax for ax in fig.axes if hasattr(ax, "_housestyle_cell")]
@@ -117,12 +125,21 @@ def fit(fig: Figure) -> None:
                 leg = south.get_window_extent(renderer).transformed(to_fig)
                 cy0 += leg.height + 6 / 72 * fig.dpi / fig.bbox.height
                 extra = [a for a in extra if a is not south]
-            tb = ax.get_tightbbox(renderer, bbox_extra_artists=extra).transformed(to_fig)
+            tb = ax.get_tightbbox(renderer, bbox_extra_artists=extra)
+            for twin in ax._twinned_axes.get_siblings(ax):
+                if twin is not ax:
+                    tb = Bbox.union([tb, twin.get_tightbbox(renderer)])
+            tb = tb.transformed(to_fig)
             need = (pos.x0 - tb.x0, pos.y0 - tb.y0, tb.x1 - pos.x1, tb.y1 - pos.y1)
             m = [max(d, n) for d, n in zip(default, need)]
             ax.set_position([cx0 + m[0], cy0 + m[1],
                              max(cx1 - m[2] - cx0 - m[0], 0.05 * w),
                              max(cy1 - m[3] - cy0 - m[1], 0.05 * h)])
+            bar = getattr(ax, "_housestyle_colorbar", None)
+            if bar is not None:
+                cax, gap, width = bar
+                p = ax.get_position()
+                cax.set_position([p.x1 + gap, p.y0, width, p.height])
 
 
 # ---- labels --------------------------------------------------------------------
@@ -137,7 +154,7 @@ def tex(s: str) -> str:
 
     Text between a pair of $ signs stays math, e.g. '$100\\times\\log$'. A lone $ is a
     dollar sign. MATLAB escapes such as '\\%' and '\\$' are accepted, so labels port
-    unchanged from MATLAB scripts.
+    unchanged from MATLAB scripts. As in LaTeX, '--' is an en dash and '---' an em dash.
     """
     if s is None or s == "":
         return s
@@ -157,6 +174,7 @@ def tex(s: str) -> str:
             continue
         for k, v in _MATLAB_ESCAPES.items():
             chunk = chunk.replace(k, v)
+        chunk = chunk.replace("---", "—").replace("--", "–")
         run = ""
         for ch in chunk:
             if ch in _MATH_ESCAPES:
@@ -201,7 +219,8 @@ def finish(ax: Axes, title: str | None = None, ylabel: str | None = None,
     if title:
         ax.set_title(title, fontsize=S.TITLE_PT, fontweight="bold", color=S.INK)
     if ylabel:
-        ax.set_ylabel(tex(ylabel), fontsize=S.LABEL_PT, color=S.INK)
+        ax.set_ylabel(tex(ylabel), fontsize=S.LABEL_PT,
+                      color=getattr(ax, "_housestyle_ycolor", S.INK))
     if xlabel:
         ax.set_xlabel(tex(xlabel), fontsize=S.LABEL_PT, color=S.INK)
     for axis in (ax.xaxis, ax.yaxis):
@@ -215,6 +234,33 @@ def finish(ax: Axes, title: str | None = None, ylabel: str | None = None,
     bb = ax.get_window_extent()
     length = 0.01 * max(bb.width, bb.height) * 72 / ax.figure.dpi   # MATLAB TickLength
     ax.tick_params(which="major", length=length, labelsize=S.TICK_PT)
+
+
+def tickaligned(ax: Axes, step: float | None = None,
+                tol: float = S.TICKALIGNED_TOL) -> None:
+    """Y-limits and ticks as MATLAB's 'tickaligned' limit method sets them.
+
+    Each limit rounds out to the next multiple of step, except when that pads more than
+    tol (24 percent) of the data range; then the limit is the data extreme. Ticks are the
+    multiples of step inside the limits. Pass MATLAB's tick step: matplotlib often picks
+    a finer one, and the rule only reproduces MATLAB with MATLAB's step. Without step,
+    the current tick spacing is used. Call it after drawing and before finish().
+    """
+    d0, d1 = ax.dataLim.intervaly
+    span = d1 - d0
+    if not (np.isfinite(d0) and np.isfinite(d1)) or span <= 0:
+        return
+    if step is None:
+        t = np.asarray(ax.get_yticks(), dtype=float)
+        step = float(t[1] - t[0]) if t.size > 1 else span
+    lo = np.floor(d0 / step + 1e-9) * step
+    hi = np.ceil(d1 / step - 1e-9) * step
+    if d0 - lo > tol * span:
+        lo = d0
+    if hi - d1 > tol * span:
+        hi = d1
+    ax.set_yticks(step * np.arange(np.ceil(lo / step - 1e-9), np.floor(hi / step + 1e-9) + 1))
+    ax.set_ylim(lo, hi)
 
 
 def _thin_yticks(ax: Axes) -> None:
@@ -255,11 +301,15 @@ def years(ax: Axes, base: int | None = None, fmt: str = "%Y") -> None:
 
 def legend(ax: Axes, handles: Sequence[Any] | None = None, labels: Sequence[str] | None = None,
            loc: str = "best", outside: str | None = None, ncols: int | None = None,
-           **kwargs: Any) -> Legend:
+           size: float | None = None, **kwargs: Any) -> Legend:
     """Legend in the house style: LaTeX text, square box, white fill. One panel only.
 
     outside='south' puts it below the axes in one row, under the tick labels, as
     MATLAB's 'southoutside' does (for stacked bars). Call it after finish().
+    size is MATLAB's legend FontSize in points (default 11.7); the line sample stays
+    30 pt long whatever the size. Marker-only entries get a short sample, as in MATLAB.
+    matplotlib's loc='best' can pick a different corner from MATLAB's; pass loc and
+    bbox_to_anchor to pin it.
     """
     if handles is None:
         handles, auto = ax.get_legend_handles_labels()
@@ -267,15 +317,20 @@ def legend(ax: Axes, handles: Sequence[Any] | None = None, labels: Sequence[str]
     elif labels is None:
         labels = [h.get_label() for h in handles]
     labels = [tex(lab) for lab in labels]
-    opts: dict[str, Any] = dict(loc=loc, prop={"size": S.LEGEND_PT}, fancybox=False,
+    fs = S.LEGEND_PT if size is None else size * S.LATEX_SCALE
+    opts: dict[str, Any] = dict(loc=loc, prop={"size": fs}, fancybox=False,
                                 framealpha=1.0, edgecolor=S.INK)
+    if handles and all(_marker_only(h) for h in handles):
+        opts["handlelength"] = 10.0 / fs           # text starts about 17 pt from the edge
+    elif size is not None:
+        opts["handlelength"] = 30.0 / fs           # MATLAB's 30 pt line sample
     if outside == "south":
         ax.figure.draw_without_rendering()
         r = ax.figure.canvas.get_renderer()
         below_px = ax.bbox.y0 - ax.xaxis.get_tightbbox(r).y0
         below_pt = max(below_px, 0) * 72 / ax.figure.dpi + 6
         opts.update(loc="upper center", bbox_to_anchor=(0.5, 0), bbox_transform=ax.transAxes,
-                    borderaxespad=below_pt / S.LEGEND_PT, ncols=ncols or len(labels))
+                    borderaxespad=below_pt / fs, ncols=ncols or len(labels))
     elif outside is not None:
         raise ValueError("outside must be None or 'south'")
     elif ncols:
@@ -285,6 +340,105 @@ def legend(ax: Axes, handles: Sequence[Any] | None = None, labels: Sequence[str]
     leg.get_frame().set_linewidth(0.5)
     ax._housestyle_south_legend = leg if outside == "south" else None
     return leg
+
+
+def _marker_only(h: Any) -> bool:
+    if isinstance(h, PathCollection):                      # scatter
+        return True
+    return (isinstance(h, Line2D) and h.get_linestyle() in ("None", "none", "", " ")
+            and h.get_marker() not in (None, "None", "none", "", " "))
+
+
+def note(ax: Axes, x: Any, y: float, s: str | Sequence[str], size: float = 8.0,
+         ha: str = "center", va: str = "center", **kwargs: Any) -> Text:
+    """LaTeX text in the plot, as MATLAB text(..., 'Interpreter', 'latex') draws it.
+
+    size is MATLAB's FontSize in points (default 8). A list of strings gives one line
+    each, aligned by ha. For plain Arial labels next to points, use ax.text.
+    """
+    lines = [s] if isinstance(s, str) else list(s)
+    opts: dict[str, Any] = dict(fontsize=size * S.LATEX_SCALE, color=S.INK, ha=ha, va=va)
+    if len(lines) > 1:
+        opts["multialignment"] = ha
+    opts.update(kwargs)
+    return ax.text(x, y, "\n".join(tex(t) for t in lines), **opts)
+
+
+def hline(ax: Axes, y: float, color: Any = S.INK, linestyle: str = "-",
+          linewidth: float = 0.5, alpha: float = 0.7, layer: str = "top",
+          label: str | None = None, **kwargs: Any) -> Line2D:
+    """Horizontal reference line, as MATLAB yline draws it: alpha 0.7, on top of the data.
+
+    layer='bottom' puts it under the data (zorder 1.5) instead of over it (zorder 3).
+    """
+    return ax.axhline(y, color=color, linestyle=linestyle, linewidth=linewidth, alpha=alpha,
+                      zorder=_LAYER[layer], label=label if label else "_nolegend_", **kwargs)
+
+
+def vline(ax: Axes, x: Any, color: Any = S.INK, linestyle: str = "-",
+          linewidth: float = 0.5, alpha: float = 0.7, layer: str = "top",
+          label: str | None = None, **kwargs: Any) -> Line2D:
+    """Vertical reference line, as MATLAB xline draws it: alpha 0.7, on top of the data.
+
+    x may be a date. layer='bottom' puts it under the data.
+    """
+    return ax.axvline(x, color=color, linestyle=linestyle, linewidth=linewidth, alpha=alpha,
+                      zorder=_LAYER[layer], label=label if label else "_nolegend_", **kwargs)
+
+
+def colorbar(ax: Axes, mappable: Any, label: str | None = None, ticks: Any = None,
+             label_size: float = 13.0, labelpad: float = 6.2) -> Colorbar:
+    """Colorbar to the right of a panel, as MATLAB colorbar('eastoutside') places it.
+
+    The panel gives up room for the bar, the bar keeps MATLAB's gap and width, and fit()
+    moves it with the panel. Ticks are inward, 10 pt, MATLAB numbers, with no minor
+    ticks at band edges; label_size is MATLAB's Label.FontSize in points.
+    """
+    fig = ax.figure
+    px = 1.0 / (fig.get_figwidth() * S.PX_PER_INCH)          # one MATLAB pixel, figure units
+    x, y, w, h = ax.get_position().bounds
+    w -= _CBAR_CARVE_PX * px
+    ax.set_position([x, y, w, h])
+    if hasattr(ax, "_housestyle_inner"):
+        ix, iy, iw, ih = ax._housestyle_inner
+        ax._housestyle_inner = (ix, iy, iw - _CBAR_CARVE_PX * px, ih)
+    gap, width = _CBAR_GAP_PX * px, _CBAR_WIDTH_PX * px
+    cax = fig.add_axes([x + w + gap, y, width, h])
+    cax.grid(False)
+    cax.set_axisbelow(False)                                 # ticks over the colour blocks
+    cb = fig.colorbar(mappable, cax=cax, ticks=ticks)
+    cb.minorticks_off()
+    cax.yaxis.set_major_formatter(FuncFormatter(_matlab_number))
+    cax.tick_params(labelsize=S.TICK_PT, direction="in", width=0.5,
+                    length=0.01 * cax.bbox.height * 72 / fig.dpi, color=S.INK, pad=4)
+    cb.outline.set_linewidth(0.5)
+    cb.outline.set_edgecolor(S.INK)
+    if label:
+        cb.set_label(tex(label), fontsize=label_size * S.LATEX_SCALE, color=S.INK,
+                     labelpad=labelpad)
+    ax._housestyle_colorbar = (cax, gap, width)
+    return cb
+
+
+def yyaxis(ax: Axes, left: Any = S.DATA, right: Any = S.SECOND) -> Axes:
+    """Right-hand y axis as MATLAB yyaxis draws it; returns the right axes.
+
+    Each y axis, its ticks and its label take the color of its series, the y grid takes
+    the left color, and only the left axes draws a grid. Prefer two panels where they
+    would do.
+    """
+    ax2 = ax.twinx()
+    ax2.grid(False)
+    ax2.tick_params(axis="y", which="both", direction="in")
+    for a, side, col in ((ax, "left", left), (ax2, "right", right)):
+        a._housestyle_ycolor = col
+        a.spines[side].set_color(col)
+        a.tick_params(axis="y", colors=col)
+        a.yaxis.label.set_color(col)
+    ax.tick_params(axis="y", grid_color=left)
+    ax.spines["right"].set_visible(False)        # the twin draws the right spine
+    ax2.spines["left"].set_visible(False)        # the left spine keeps its color
+    return ax2
 
 
 # ---- marks ---------------------------------------------------------------------

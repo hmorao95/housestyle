@@ -38,6 +38,11 @@ LABEL_PT = 10.25     # LaTeX-interpreted axis labels
 TICK_PT = 10.0
 LEGEND_PT = 10.9     # LaTeX-interpreted legend text
 EVENT_PT = 8.0
+LATEX_SCALE = LABEL_PT / 11.0   # MATLAB LaTeX point size -> matplotlib mathtext size
+
+# MATLAB tickaligned limits stop at the data when rounding out would pad more than this
+# share of the data range (measured: 23.1 percent kept, 25.1 percent skipped)
+TICKALIGNED_TOL = 0.24
 
 SANS = ["Arial", "Helvetica", "Liberation Sans", "DejaVu Sans"]
 
